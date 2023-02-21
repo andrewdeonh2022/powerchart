@@ -4,23 +4,20 @@ from collections import defaultdict
 import glob
 import json
 
-def GetCSTList():
+def GetCSTList(cst_path):
 
-	cst_path = "C:\\Users\\ADeonarine\\OneDrive - HealthBC\\Desktop\\OneDrive_2023-01-04\\CST DCW's"
+	#cst_path = "c:\\Apache24\\htdocs\\orders\\data\\high_priority\\DCWs"
 
-	subdirs = []
-	for tfile in glob.glob(cst_path + "\\*"):
-		if ((tfile.find('.zip') == -1) and (tfile.find('.xlsm') == -1)):
-			subdirs.append(tfile)
+	#subdirs = []
+	#for tfile in glob.glob(cst_path + "\\*"):
+	#	if ((tfile.find('.zip') == -1) and (tfile.find('.xlsm') == -1)):
+	#		subdirs.append(tfile)
 
 	filelist = []
-	for tdir in range(0, len(subdirs)):
-		#print(subdirs[tdir])
-		for tfile in glob.glob(subdirs[tdir] + "\\*.xlsm"):
-			#if ((tfile.find('.zip') == -1) and (tfile.find('.xlsm') == -1)):
-			filelist.append(tfile)
+	for tfile in glob.glob(cst_path + "\\*.xlsx"):
+		filelist.append(tfile)
 
-	tfile = "cst_filelist.csv"
+	tfile = "high_priority.tsv"
 	f = open(tfile, "w")
 	for x in range(0, len(filelist)):
 		f.write(str(x) + "\t" + filelist[x] + "\n")
@@ -48,6 +45,22 @@ def LoadNHOrderData():
 		matchdata[val2] = ""
 
 	return matchdata
+
+def LoadNHToCSTMap():
+
+	# updated from OrderSetMapping.xlsx
+	tablemap = defaultdict(str)
+	with open("nh_to_cst_revised_map.tsv", "r") as infile:
+		theader = infile.readline()
+		for line in infile:
+			line = line.strip()
+			ldata = line.split("\t")
+			tcst = ldata[0].lower().strip()
+			tnh = ldata[1].strip()
+			tablemap[tcst] = tnh
+	infile.close()
+
+	return tablemap
 
 def MatchToNHOrders(tval, matchdata, match_results):
 
@@ -204,7 +217,20 @@ def GetNHCategory(tval):
 	# Other Test                    -----
 	# Supplies                      Supplies
 	
-	retval = tval + "|Clinical Categories"
+	nval = tval
+	if tval == "Allergies":
+		nval = "Non Categorized"
+	if tval == "Diagnoses":
+		nval = "Non Categorized"
+	if tval == "Medical Supplies":
+		nval = "Non Categorized"
+	if tval == "Special Procedures":
+		nval = "Non Categorized"
+	if tval == "Other Test":
+		nval = "Non Categorized"
+	
+	
+	retval = nval + "|Clinical Categories"
 
 	return retval
 
@@ -244,45 +270,74 @@ def XMLBuildSentenceList(dcwid, catid, compid, sentence_list, detail_list):
 		for tid in sentence_list[dcwid][catid][compid]:
 			tsentence = sentence_list[dcwid][catid][compid][tid]
 			tsentence = FormatStr(tsentence)
-			tXML += GetIndent(8) + "<SENTENCE>\n"
-			tXML += GetIndent(9) + "<DISPLAYLINE>" + tsentence + "</DISPLAYLINE>\n"
-			tXML += GetIndent(9) + tsentence
-			tXML += "\n" + GetIndent(8) + "</SENTENCE>\n"
+			if (tsentence != "None") and (tsentence != ""):
+				tXML += GetIndent(8) + "<SENTENCE>\n"
+				tXML += GetIndent(9) + "<DISPLAYLINE>" + tsentence + "</DISPLAYLINE>\n"
+				#tXML += GetIndent(9) + tsentence
+				tXML += "\n" + GetIndent(8) + "</SENTENCE>\n"
 		tXML += GetIndent(7) + "</SENTENCELIST>\n"
 
 	return tXML
 	
-def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_list, matchdata, match_results):
+def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_list, matchdata, match_results, ordermap, component_type):
 
 	tXML = "\n" + GetIndent(5) + "<COMPONENTLIST>\n"
 	for tid in component_list[dcwid][catid]:
+	
+		# check if note or order - component_type[str(dcwID)][currCategory][tcomponent] = tcompType
+		tcomponent_type = component_type[dcwid][catid][tid].lower().strip()
 		tcaption = component_list[dcwid][catid][tid]
 		tcaption = FormatStr(tcaption)
-		tXML += GetIndent(6) + "<COMPONENT>\n"
-		tXML += GetIndent(7) + "<CAPTION>" + tcaption + "</CAPTION>\n"
-		
-		# check to see if caption exists in NH orders:
-		match_results = MatchToNHOrders(tcaption, matchdata, match_results)
-		
-		tXML += GetIndent(7) + "<CKI/>\n"
-		tXML += GetIndent(7) + "<DEFAULTOSIND>1</DEFAULTOSIND>\n"
-		tXML += GetIndent(7) + "<DEFAULTSELECTED>1</DEFAULTSELECTED>\n"
-		tXML += GetIndent(7) + "<ORDERABLETYPE>O</ORDERABLETYPE>\n"
-		#print(dcwid + " - Sentences: " + str(sentence_list[dcwid][catid][tid]))
-		tXML += GetIndent(7) + XMLBuildSentenceList(dcwid, catid, tid, sentence_list, detail_list)
+		ttype = "O"
+		if (tcaption != "") and (tcaption != "None"):
+			
+			tXML += GetIndent(6) + "<COMPONENT>\n"
+			
+			ncaption = tcaption.lower().strip()
+			pcaption = FormatStr(tcaption).strip()
+			#if pcaption.find('&') > -1:
+			#	print("Found Ampersand: " + pcaption)
+			if ncaption in ordermap:
+				if (ordermap[ncaption] != 'no nh match') and (ordermap[ncaption] != 'ignore'):
+					pcaption = FormatStr(ordermap[ncaption])			
+				if (ordermap[ncaption] == 'no nh match'):
+					#print("No NH Match: " + pcaption)
+					pcaption = "NH Order to be configured: " + pcaption
+					ttype = "L"
+
+			if (tcomponent_type == "note") or (ttype == "L"):
+				tXML += GetIndent(7) + "<CAPTION>" + pcaption + "</CAPTION>"
+				ttype = "L"
+			
+			if ttype == "O":
+				if pcaption.find('I&O') > -1:
+					print("Order: " + pcaption)
+					#pcaption = FormatStr(pcaption)
+					#print("Formatted: " + pcaption)
+				tXML += GetIndent(7) + "<CAPTION>" + pcaption + "</CAPTION>\n"
+			
+			# check to see if caption exists in NH orders:
+			match_results = MatchToNHOrders(tcaption, matchdata, match_results)
+			
+			tXML += GetIndent(7) + "<CKI/>\n"
+			tXML += GetIndent(7) + "<DEFAULTOSIND>1</DEFAULTOSIND>\n"
+			tXML += GetIndent(7) + "<DEFAULTSELECTED>1</DEFAULTSELECTED>\n"
+			tXML += GetIndent(7) + "<ORDERABLETYPE>" + ttype + "</ORDERABLETYPE>\n"
+			#print(dcwid + " - Sentences: " + str(sentence_list[dcwid][catid][tid]))
+			#tXML += GetIndent(7) + XMLBuildSentenceList(dcwid, catid, tid, sentence_list, detail_list)
 		tXML += GetIndent(6) + "</COMPONENT>\n"
 	tXML += GetIndent(5) + "</COMPONENTLIST>\n"
 
 	return tXML, match_results
 
-def XMLBuildCategoryList(dcwid, category_list, component_list, sentence_list, detail_list, matchdata, match_results):
+def XMLBuildCategoryList(dcwid, category_list, component_list, sentence_list, detail_list, matchdata, match_results, ordermap, component_type):
 
 	tXML = GetIndent(3) + "<CATEGORYLIST>\n"
 	for tid in category_list[dcwid]:
 	
 		# get NH category
 		ncat = GetNHCategory(tid)
-		xmlstr, match_results = XMLBuildComponentList(dcwid, tid, component_list, sentence_list, detail_list, matchdata, match_results)
+		xmlstr, match_results = XMLBuildComponentList(dcwid, tid, component_list, sentence_list, detail_list, matchdata, match_results, ordermap, component_type)
 	
 		tXML += GetIndent(4) + "<CATEGORY>\n"
 		tXML += GetIndent(5) + "<CAPTION>" + tid + "</CAPTION>\n"
@@ -357,12 +412,12 @@ def XMLMakeRoot(ttitle, tphase):
 
 	return tXML
 	
-def XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp_precheck, comp_required, componentlist, sentencelist, detaillist, matchdata, match_results):
+def XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp_precheck, comp_required, componentlist, sentencelist, detaillist, matchdata, match_results, ordermap):
 
 	# Create the XML Document Stub and Components
 	# Using C:\Apache24\htdocs\orders\data\island_xml\Subcutaneous Insulin Cerner PowePlan V3.xml
 	
-	opath = "C:\\Apache24\\htdocs\\orders\\data"
+	opath = "C:\\Apache24\\htdocs\\orders\\data\\high_priority\\XML"
 	
 	for tid in dcw_index:
 		#print("Making XML file: " + tid)
@@ -373,7 +428,7 @@ def XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp
 		MainXML = XMLMakeRoot(ttitle, tphase)
 		
 		# Create Category Data
-		CategoryXML, match_results = XMLBuildCategoryList(tid, categorylist, componentlist, sentencelist, detaillist, matchdata, match_results)
+		CategoryXML, match_results = XMLBuildCategoryList(tid, categorylist, componentlist, sentencelist, detaillist, matchdata, match_results, ordermap, component_type)
 		MainXML = MainXML.replace('{%CategoryList%}', CategoryXML)
 
 		# Get Filename for XML
@@ -381,6 +436,7 @@ def XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp
 		ofile = tdata[len(tdata) - 1]
 		
 		tnfile = opath + "\\" + ofile + ".xml"
+		#tnfile = ofile + ".xml"
 		#f = open(tid + ".xml", "w")
 		f = open(tnfile, "w")
 		f.write(MainXML)
@@ -399,7 +455,7 @@ def MakeBatchFile(dcw_index):
 	f.write(tbatch)
 	f.close()
 
-def ExtractOrderData(tfile, matchdata, match_results):
+def ExtractOrderData(tfile, matchdata, match_results, ordermap):
 
 	# Hierarchy: KNOWLEDGEPLAN => ORDERSETLIST => ORDERSET => CATEGORYLIST => 
 	# COMPONENTLIST => COMPONENT => SENTENCELIST => SENTENCE
@@ -481,24 +537,32 @@ def ExtractOrderData(tfile, matchdata, match_results):
 			catval = str(sheet.cell(row=x, column=3).value)
 			tcat = catval
 			
+			# https://stackoverflow.com/questions/40464804/python-openpyxl-outputs-none-for-empty-cells
+			if tcat == "None":
+				tcat = ""
+			
 			if (tcat != "") and (tcat != "null"):
 				categorylist[str(dcwID)][tcat] = '1'
 				categoryvocab[tcat] = 1
 				currCategory = tcat
 			
-			if tcat == "":
+			#print("Category: " + tcat)
+			
+			if (tcat == ""):
 			
 				tcompType = sheet.cell(row=x, column=5).value				
 				if str(tcompType) != "":
-								
+					
+					# remove unicode characters from certain fields
 					#ttitle = sheet.cell(row=x, column=1).value
-					tphase = str(sheet.cell(row=x, column=2).value)
+					tphase = str(sheet.cell(row=x, column=2).value).strip().encode("ascii", "ignore").decode()
 					#tcat = sheet.cell(row=x, column=3).value
-					tcompType = str(sheet.cell(row=x, column=5).value)
+					tcompType = str(sheet.cell(row=x, column=5).value).strip().encode("ascii", "ignore").decode()
+					#print("Component type: " + tcompType)
 					treq = str(sheet.cell(row=x, column=6).value)
 					tprecheck = str(sheet.cell(row=x, column=7).value)
-					tcomponent = str(sheet.cell(row=x, column=8).value)
-					tsentence = str(sheet.cell(row=x, column=10).value)
+					tcomponent = str(sheet.cell(row=x, column=8).value).strip().encode("ascii", "ignore").decode()
+					tsentence = str(sheet.cell(row=x, column=10).value).strip().encode("ascii", "ignore").decode()
 					
 					# get details
 					tevidence = str(sheet.cell(row=x, column=15).value)
@@ -511,60 +575,62 @@ def ExtractOrderData(tfile, matchdata, match_results):
 					troute = str(sheet.cell(row=x, column=23).value)
 					tfreq = str(sheet.cell(row=x, column=24).value)
 					tprn = str(sheet.cell(row=x, column=25).value)
+					
+					#print("Component: " + tcomponent)
 										
-					if tphase != "":
+					if (tphase != "") and (tphase != "None"):
 						phaselist[str(dcwID)] = tphase
 
-					if tcomponent != "":
+					if (tcomponent != "") and (tcomponent != "None"):
 						#print("Found component: " + tcomponent)
 						componentlist[str(dcwID)][currCategory][tcomponent] = tcomponent
 						currComponent = tcomponent
 
-					if tcompType != "":
+					if (tcompType != "") and (tcompType != "None"):
 						component_type[str(dcwID)][currCategory][tcomponent] = tcompType
 
-					if tprecheck != "":
+					if (tprecheck != "") and (tprecheck != "None"):
 						comp_precheck[str(dcwID)][currCategory][tcomponent] = tprecheck
 
-					if treq != "":
+					if (treq != "") and (treq != "None"):
 						comp_required[str(dcwID)][currCategory][tcomponent] = treq
 
-					if tsentence != "":
+					if (tsentence != "") and (tsentence != "None"):
 						sentencelist[str(dcwID)][currCategory][currComponent][tsentence] = tsentence
 
 					# get details for each sentence
-					if tevidence != "":
+					if (tevidence != "") and (tevidence != "None"):
 						detaillist[str(dcwID)][currCategory][currComponent][tsentence]['evidence'] = tevidence
 					
-					if tdose != "":
+					if (tdose != "") and (tdose != "None"):
 						detaillist[str(dcwID)][currCategory][currComponent][tsentence]['dose'] = tdose
 						
-					if tdoseunit != "":
+					if (tdoseunit != "") and (tdoseunit != "None"):
 						detaillist[str(dcwID)][currCategory][currComponent][tsentence]['doseunit'] = tdoseunit
 
-					if tvolume != "":
+					if (tvolume != "") and (tvolume != "None"):
 						detaillist[str(dcwID)][currCategory][currComponent][tsentence]['volume'] = tvolume
 
-					if tvolumeunit != "":
+					if (tvolumeunit != "") and (tvolumeunit != "None"):
 						detaillist[str(dcwID)][currCategory][currComponent][tsentence]['volumeunit'] = tvolumeunit
 
-					if trate != "":
+					if (trate != "") and (trate != "None"):
 						detaillist[str(dcwID)][currCategory][currComponent][tsentence]['rate'] = trate
 
-					if trateunit != "":
+					if (trateunit != "") and (trateunit != "None"):
 						detaillist[str(dcwID)][currCategory][currComponent][tsentence]['rateunit'] = trateunit
 
-					if troute != "":
+					if (troute != "") and (troute != "None"):
 						detaillist[str(dcwID)][currCategory][currComponent][tsentence]['route'] = troute
 
-					if tfreq != "":
+					if (tfreq != "") and (tfreq != "None"):
 						detaillist[str(dcwID)][currCategory][currComponent][tsentence]['frequency'] = tfreq
 
-					if tprn != "":
+					if (tprn != "") and (tprn != "None"):
 						detaillist[str(dcwID)][currCategory][currComponent][tsentence]['prn'] = tprn
 
 		# Create XML Files from parsed data
-		match_results = XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp_precheck, comp_required, componentlist, sentencelist, detaillist, matchdata, match_results)
+		match_results = XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp_precheck, comp_required, componentlist, sentencelist, detaillist, matchdata, match_results, ordermap)
 		
 		# make batch loader
 		#MakeBatchFile(dcw_index)
@@ -629,13 +695,18 @@ def ExtractOrderData(tfile, matchdata, match_results):
 	return match_results
 
 # Get a list of DCWs
-#filelist = GetCSTList()
-
-filelist = LoadPriorityCSTList("high_priority.tsv")
+tbatch = "Batch1"
+cst_path = "C:\\Apache24\\htdocs\\orders\\data\\high_priority\\" + tbatch
+filelist = GetCSTList(cst_path)
+#filelist = LoadPriorityCSTList("high_priority.tsv")
 #filelist = LoadPriorityCSTList("neph_orders.tsv")
+
+#filelist = ["c:\\Apache24\\htdocs\\orders\\data\\high_priority\\DCWs\\CARD Heart Failure.xlsx"]
 
 matchdata = LoadNHOrderData()
 match_results = defaultdict(str)
+
+ordermap = LoadNHToCSTMap()
 
 # parse excel sheet into JSON
 tcnt = 0
@@ -646,11 +717,11 @@ for x in range(0, len(filelist)):
 	ofile = ofiledata[len(ofiledata) - 1]
 	print("Processing: " + ofile)
 	#if tcnt < 10:
-	match_results = ExtractOrderData(nfile, matchdata, match_results)
+	match_results = ExtractOrderData(nfile, matchdata, match_results, ordermap)
 	tcnt += 1
 
 # write out mapping between NH order library and CST
-f = open("nh_to_cst_map.tsv", "w")
+f = open("nh_to_cst_map_" + tbatch + ".tsv", "w")
 for tid in match_results:
 	f.write(tid + "\t" + match_results[tid] + "\n")
 f.close()
