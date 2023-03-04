@@ -4,6 +4,78 @@ from collections import defaultdict
 import glob
 import json
 
+def GetCurrentVersion():
+
+	tversion = 0
+	with open("version_code.tsv", "r") as infile:
+		for line in infile:
+			line = line.strip()
+			ldata = line.split("\t")
+			if ldata[0] == "version":
+				tversion = round(float(ldata[1]), 2)
+	infile.close()
+
+	nversion = tversion + 0.01
+	nversion = round(nversion, 2)
+	f = open("version_code.tsv", "w")
+	f.write("version\t" + str(nversion))
+	f.close()
+	
+	return tversion
+
+def LoadOrderSetIndex():
+
+	index_map = defaultdict(int)
+	with open("order_set_index.tsv", "r") as infile:
+		for line in infile:
+			line = line.strip()
+			ldata = line.split("\t")
+			tfile = ldata[1]
+			tindex = ldata[0]
+			
+	infile.close()
+	
+	return index_map
+
+def LoadMarch3Mapping():
+
+	current_map = defaultdict(str)
+	with open("mapping_mar3_2023.tsv", "r", encoding="utf-8") as infile:
+		theader = infile.readline()
+		for line in infile:
+			line = line.strip()
+			ldata = line.split("\t")
+			if len(ldata) > 2:
+				tbase = ldata[0].lower().strip()
+				tval = ldata[1]
+				if tval.lower().strip() == "insert note":
+					tval = ldata[1] + "::" + ldata[3]
+				current_map[tbase] = tval
+			
+	infile.close()
+
+	return current_map
+
+	# Use colors from excel file
+	# https://stackoverflow.com/questions/32736419/get-cell-color-from-xlsx
+	#book = openpyxl.load_workbook(tfile)
+	#sheet = book.active 
+	#row_count = sheet.max_row
+	#column_count = sheet.max_column
+	#matchdata = defaultdict(str)
+	#for x in range(1, row_count):
+	#	# match on e, f
+	#	val1 = str(sheet.cell(row=x, column=5).value).strip().lower()
+	#	val2 = str(sheet.cell(row=x, column=6).value).strip().lower()
+	#	color1 = sheet.cell(row=x, column=5).fill.start_color.index
+	#	color2 = sheet.cell(row=x, column=6).fill.start_color.index
+	#	
+	#	#print("NH data: " + "\t" + str(val1) + "\t" + str(val2))
+	#	matchdata[val1] = ""
+	#	matchdata[val2] = ""
+
+	#return matchdata
+
 def GetCSTList(cst_path):
 
 	#cst_path = "c:\\Apache24\\htdocs\\orders\\data\\high_priority\\DCWs"
@@ -118,7 +190,7 @@ def MakeHTMLFile(tid, ttitle, collist, ttable):
 
 	tfile = str(tid) + ".html"
 	f = open(tfile, "w")
-	f.write("<html><head><title>" + ttitle + "</title>")
+	f.write("<html><head><title>" + ttitle + " (Version " + str() + ")</title>")
 	f.write('<link rel="stylesheet" href="cst_table.css">' + "\n")
 	f.write("</head><body style=\"font-family: arial;\">")
 	f.write("<h2>" + ttitle + "</h2>\n")
@@ -289,43 +361,56 @@ def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_li
 		tcaption = component_list[dcwid][catid][tid]
 		tcaption = FormatStr(tcaption)
 		ttype = "O"
+		nXML = ''
 		if (tcaption != "") and (tcaption != "None"):
 			
-			tXML += GetIndent(6) + "<COMPONENT>\n"
+			nXML += GetIndent(6) + "<COMPONENT>\n"
 			
 			ncaption = tcaption.lower().strip()
 			pcaption = FormatStr(tcaption).strip()
 			#if pcaption.find('&') > -1:
 			#	print("Found Ampersand: " + pcaption)
 			if ncaption in ordermap:
-				if (ordermap[ncaption] != 'no nh match') and (ordermap[ncaption] != 'ignore'):
+			
+				if (ordermap[ncaption] != 'no nh match') and (ordermap[ncaption] != 'ignore') and (ordermap[ncaption].find('insert note::') == -1):
 					pcaption = FormatStr(ordermap[ncaption])			
+			
 				if (ordermap[ncaption] == 'no nh match'):
-					#print("No NH Match: " + pcaption)
 					pcaption = "NH Order to be configured: " + pcaption
 					ttype = "L"
-
+					
+				if (ordermap[ncaption] == 'ignore'):
+					pcaption = "ignore"
+					ttype = "X"				
+					
+				if (ordermap[ncaption].find('insert note::') > -1):
+					pcaption = ordermap[ncaption].replace('insert note::', '')
+					ttype = "L"
+			
+			if pcaption == "ignore":
+				ttype = "X"
+			
 			if (tcomponent_type == "note") or (ttype == "L"):
-				tXML += GetIndent(7) + "<CAPTION>" + pcaption + "</CAPTION>"
-				ttype = "L"
+				if pcaption != 'ignore':
+					nXML += GetIndent(7) + "<CAPTION>" + pcaption + "</CAPTION>"
+					ttype = "L"
 			
 			if ttype == "O":
-				if pcaption.find('I&O') > -1:
-					print("Order: " + pcaption)
-					#pcaption = FormatStr(pcaption)
-					#print("Formatted: " + pcaption)
-				tXML += GetIndent(7) + "<CAPTION>" + pcaption + "</CAPTION>\n"
+				# check to see if caption exists in NH orders:
+				match_results = MatchToNHOrders(tcaption, matchdata, match_results)
+				nXML += GetIndent(7) + "<CAPTION>" + pcaption + "</CAPTION>\n"			
 			
-			# check to see if caption exists in NH orders:
-			match_results = MatchToNHOrders(tcaption, matchdata, match_results)
-			
-			tXML += GetIndent(7) + "<CKI/>\n"
-			tXML += GetIndent(7) + "<DEFAULTOSIND>1</DEFAULTOSIND>\n"
-			tXML += GetIndent(7) + "<DEFAULTSELECTED>1</DEFAULTSELECTED>\n"
-			tXML += GetIndent(7) + "<ORDERABLETYPE>" + ttype + "</ORDERABLETYPE>\n"
+			nXML += "\n" + GetIndent(7) + "<CKI/>\n"
+			nXML += GetIndent(7) + "<DEFAULTOSIND>1</DEFAULTOSIND>\n"
+			nXML += GetIndent(7) + "<DEFAULTSELECTED>1</DEFAULTSELECTED>\n"
+			nXML += GetIndent(7) + "<ORDERABLETYPE>" + ttype + "</ORDERABLETYPE>\n"
 			#print(dcwid + " - Sentences: " + str(sentence_list[dcwid][catid][tid]))
 			#tXML += GetIndent(7) + XMLBuildSentenceList(dcwid, catid, tid, sentence_list, detail_list)
-		tXML += GetIndent(6) + "</COMPONENT>\n"
+			nXML += GetIndent(6) + "</COMPONENT>\n"
+			
+			if (ttype != 'X') and (pcaption != 'ignore'):
+				tXML += nXML
+			
 	tXML += GetIndent(5) + "</COMPONENTLIST>\n"
 
 	return tXML, match_results
@@ -354,14 +439,15 @@ def XMLMakeRoot(ttitle, tphase):
 	tXML = '<?xml version="1.0" encoding="UTF-8"?>' + "\n"
 	tXML += "<KNOWLEDGEPLAN>\n"
 	tXML += "\t" + "<SOURCEORDERSETTYPE>CAREPLAN</SOURCEORDERSETTYPE>\n"
-	tXML += "\t" + "<CAPTION>" + ttitle + "</CAPTION>\n"
+	tXML += "\t" + "<CAPTION>" + ttitle + " (Version " + str(mainversion) + ")</CAPTION>\n"
 	tXML += "\t" + "<ORDERSETLIST>\n"
 	tXML += "\t\t" + "<ORDERSET>\n"
-	tXML += "\t\t\t" + "<CAPTION>" + ttitle + "</CAPTION>\n"
-	tXML += "\t\t\t" + "<DISPLAY>" + ttitle + "</DISPLAY>\n"
+	tXML += "\t\t\t" + "<CAPTION>" + ttitle + " (Version " + str(mainversion) + ")</CAPTION>\n"
+	tXML += "\t\t\t" + "<DISPLAY>" + ttitle + " (Version " + str(mainversion) + ")</DISPLAY>\n"
 	tXML += "\t\t\t" + "<EVIDENCEURL/>" + "\n"
 	tXML += "\t\t\t" + "<EVIDENCEURLTYPEMEAN/>" + "\n"
 	tXML += "\t\t\t" + "<CKI/>" + "\n"
+	# don't change this version field - it'a a binary flag
 	tXML += "\t\t\t" + "<VERSION>1</VERSION>" + "\n"
 	tXML += "\t\t\t" + "<DURATION>0</DURATION>" + "\n"
 	tXML += "\t\t\t" + "<DURATIONUNITMEAN/>" + "\n"
@@ -412,7 +498,7 @@ def XMLMakeRoot(ttitle, tphase):
 
 	return tXML
 	
-def XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp_precheck, comp_required, componentlist, sentencelist, detaillist, matchdata, match_results, ordermap):
+def XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp_precheck, comp_required, componentlist, sentencelist, detaillist, matchdata, match_results, ordermap, file_index):
 
 	# Create the XML Document Stub and Components
 	# Using C:\Apache24\htdocs\orders\data\island_xml\Subcutaneous Insulin Cerner PowePlan V3.xml
@@ -420,6 +506,7 @@ def XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp
 	opath = "C:\\Apache24\\htdocs\\orders\\data\\high_priority\\XML"
 	
 	for tid in dcw_index:
+	
 		#print("Making XML file: " + tid)
 		ttitle = dcw_index[tid]
 		tphase = phaselist[tid]
@@ -435,12 +522,13 @@ def XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp
 		tdata = tfile.split('\\')
 		ofile = tdata[len(tdata) - 1]
 		
-		tnfile = opath + "\\" + ofile + ".xml"
+		tnfile = opath + "\\" + str(file_index) + " - " + ofile + ".xml"
 		#tnfile = ofile + ".xml"
 		#f = open(tid + ".xml", "w")
 		f = open(tnfile, "w")
 		f.write(MainXML)
 		f.close()
+		
 	
 	return match_results
 
@@ -455,7 +543,7 @@ def MakeBatchFile(dcw_index):
 	f.write(tbatch)
 	f.close()
 
-def ExtractOrderData(tfile, matchdata, match_results, ordermap):
+def ExtractOrderData(tfile, matchdata, match_results, ordermap, file_index):
 
 	# Hierarchy: KNOWLEDGEPLAN => ORDERSETLIST => ORDERSET => CATEGORYLIST => 
 	# COMPONENTLIST => COMPONENT => SENTENCELIST => SENTENCE
@@ -630,7 +718,7 @@ def ExtractOrderData(tfile, matchdata, match_results, ordermap):
 						detaillist[str(dcwID)][currCategory][currComponent][tsentence]['prn'] = tprn
 
 		# Create XML Files from parsed data
-		match_results = XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp_precheck, comp_required, componentlist, sentencelist, detaillist, matchdata, match_results, ordermap)
+		match_results = XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp_precheck, comp_required, componentlist, sentencelist, detaillist, matchdata, match_results, ordermap, file_index)
 		
 		# make batch loader
 		#MakeBatchFile(dcw_index)
@@ -694,8 +782,13 @@ def ExtractOrderData(tfile, matchdata, match_results, ordermap):
 
 	return match_results
 
+# get current global version
+mainversion = GetCurrentVersion()
+
 # Get a list of DCWs
-tbatch = "Batch1"
+#tbatch = "Batch1"
+#tbatch = "Batch2"
+tbatch = "March3"
 cst_path = "C:\\Apache24\\htdocs\\orders\\data\\high_priority\\" + tbatch
 filelist = GetCSTList(cst_path)
 #filelist = LoadPriorityCSTList("high_priority.tsv")
@@ -706,7 +799,9 @@ filelist = GetCSTList(cst_path)
 matchdata = LoadNHOrderData()
 match_results = defaultdict(str)
 
-ordermap = LoadNHToCSTMap()
+#ordermap = LoadNHToCSTMap()
+ordermap = LoadMarch3Mapping()
+current_map = ordermap
 
 # parse excel sheet into JSON
 tcnt = 0
@@ -717,15 +812,19 @@ for x in range(0, len(filelist)):
 	ofile = ofiledata[len(ofiledata) - 1]
 	print("Processing: " + ofile)
 	#if tcnt < 10:
-	match_results = ExtractOrderData(nfile, matchdata, match_results, ordermap)
+	match_results = ExtractOrderData(nfile, matchdata, match_results, ordermap, x)
 	tcnt += 1
 
 # write out mapping between NH order library and CST
 f = open("nh_to_cst_map_" + tbatch + ".tsv", "w")
 for tid in match_results:
-	f.write(tid + "\t" + match_results[tid] + "\n")
+	tresult = match_results[tid]
+	if tid in current_map:
+		if current_map[tid] != "no nh match":
+			tresult = current_map[tid]
+	if tid not in current_map:
+		f.write(tid + "\t" + tresult + "\n")
 f.close()
-
 
 # write XML
 #data = defaultdict(str)
