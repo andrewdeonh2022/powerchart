@@ -49,7 +49,7 @@ def LoadMarch3Mapping():
 				tbase = ldata[0].lower().strip()
 				tval = ldata[1]
 				if tval.lower().strip() == "insert note":
-					tval = ldata[1] + "::" + ldata[3]
+					tval = "insert note::" + ldata[3]
 				current_map[tbase] = tval
 			
 	infile.close()
@@ -235,12 +235,14 @@ def EncodeURL(tval):
 def FormatStr(tfield):
 
 	#if (tfield.find("http:") > -1) or (tfield.find("https:") > -1) or (tfield.find("www.") > -1):
-	tfield = tfield.replace('&', '&amp;')
-	tfield = tfield.replace("\n", "&#10;&#13;")
-	tfield = tfield.replace("<", "&lt;")
-	tfield = tfield.replace(">", "&gt;")
+	nfield = tfield.replace('&', '&amp;')
+	nfield = nfield.replace("\n", "&#10;&#13;")
+	nfield = nfield.replace("<", "&lt;")
+	nfield = nfield.replace(">", "&gt;")
+	nfield = nfield.replace('”', '"')
+	nfield = nfield.replace('“', '"')
 
-	return tfield
+	return nfield
 
 def CreateHTMLPages():
 
@@ -353,6 +355,7 @@ def XMLBuildSentenceList(dcwid, catid, compid, sentence_list, detail_list):
 	
 def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_list, matchdata, match_results, ordermap, component_type):
 
+	showdebug = 0
 	tXML = "\n" + GetIndent(5) + "<COMPONENTLIST>\n"
 	for tid in component_list[dcwid][catid]:
 	
@@ -360,38 +363,64 @@ def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_li
 		tcomponent_type = component_type[dcwid][catid][tid].lower().strip()
 		tcaption = component_list[dcwid][catid][tid]
 		tcaption = FormatStr(tcaption)
+		showdebug = 0
+
+		#if showdebug == 1:
+		#print("tcaption value: " + tcaption)
+		#print("type: " + tcomponent_type)
+		
 		ttype = "O"
+		if tcomponent_type == "note":	
+			ttype = "L"
+			
 		nXML = ''
 		if (tcaption != "") and (tcaption != "None"):
 			
 			nXML += GetIndent(6) + "<COMPONENT>\n"
-			
 			ncaption = tcaption.lower().strip()
 			pcaption = FormatStr(tcaption).strip()
-			#if pcaption.find('&') > -1:
-			#	print("Found Ampersand: " + pcaption)
+			porder = ordermap[ncaption].lower().strip()
+			tdup = False
+			if tcaption.find('duplicate') > -1:
+				tdup = True
+				tindex = ncaption.index('duplicate')
+				dupsuffix = ncaption[tindex:]
+				ncaption = ncaption[0:tindex].lower().strip()
+				
 			if ncaption in ordermap:
 			
-				if (ordermap[ncaption] != 'no nh match') and (ordermap[ncaption] != 'ignore') and (ordermap[ncaption].find('insert note::') == -1):
+				# map orders
+				if (porder != 'no nh match') and (porder != 'ignore') and (porder.find('insert note::') == -1):
 					pcaption = FormatStr(ordermap[ncaption])			
 			
-				if (ordermap[ncaption] == 'no nh match'):
+				if (porder == 'no nh match'):
 					pcaption = "NH Order to be configured: " + pcaption
 					ttype = "L"
 					
-				if (ordermap[ncaption] == 'ignore'):
+				if (porder == 'ignore'):
 					pcaption = "ignore"
 					ttype = "X"				
 					
-				if (ordermap[ncaption].find('insert note::') > -1):
+				if (porder.find('insert note::') > -1):
 					pcaption = ordermap[ncaption].replace('insert note::', '')
+					pcaption = FormatStr(pcaption).strip()
 					ttype = "L"
-			
-			if pcaption == "ignore":
+
+			if tdup == True:
+				pcaption = "Duplicate order to be configured: " + pcaption + " " + dupsuffix
+				ttype = "L"
+							
+			if ncaption == "ignore":
 				ttype = "X"
 			
-			if (tcomponent_type == "note") or (ttype == "L"):
-				if pcaption != 'ignore':
+			# bug fix - if it shows up as empty...
+			if pcaption == "":
+				pcaption = tcaption
+
+			print("ncaption: " + ncaption + "\t" + " pcaption: " + pcaption)
+			
+			if (tcomponent_type == "note") or (ttype == "L") or (ncaption not in ordermap):
+				if ncaption != 'ignore':
 					nXML += GetIndent(7) + "<CAPTION>" + pcaption + "</CAPTION>"
 					ttype = "L"
 			
@@ -410,6 +439,9 @@ def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_li
 			
 			if (ttype != 'X') and (pcaption != 'ignore'):
 				tXML += nXML
+				
+	if (showdebug == 1):
+		print(nXML)
 			
 	tXML += GetIndent(5) + "</COMPONENTLIST>\n"
 
@@ -525,7 +557,7 @@ def XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp
 		tnfile = opath + "\\" + str(file_index) + " - " + ofile + ".xml"
 		#tnfile = ofile + ".xml"
 		#f = open(tid + ".xml", "w")
-		f = open(tnfile, "w")
+		f = open(tnfile, "w", encoding="utf-8")
 		f.write(MainXML)
 		f.close()
 		
@@ -669,19 +701,39 @@ def ExtractOrderData(tfile, matchdata, match_results, ordermap, file_index):
 					if (tphase != "") and (tphase != "None"):
 						phaselist[str(dcwID)] = tphase
 
+					tcompFound = False
 					if (tcomponent != "") and (tcomponent != "None"):
-						#print("Found component: " + tcomponent)
-						componentlist[str(dcwID)][currCategory][tcomponent] = tcomponent
-						currComponent = tcomponent
-
+					
+						if tcomponent in componentlist[str(dcwID)][currCategory]:
+							tcompFound = True
+					
+						if tcompFound == False:
+							componentlist[str(dcwID)][currCategory][tcomponent] = tcomponent
+							currComponent = tcomponent
+						
+						if tcompFound == True:
+							dupcomponent = tcomponent + " duplicate"
+							dupindex = 2
+							while dupcomponent in componentlist[str(dcwID)][currCategory]:
+								dupcomponent = tcomponent + " duplicate " + str(dupindex)
+								dupindex += 1
+								
+							componentlist[str(dcwID)][currCategory][dupcomponent] = dupcomponent
+							currComponent = dupcomponent
+						
 					if (tcompType != "") and (tcompType != "None"):
-						component_type[str(dcwID)][currCategory][tcomponent] = tcompType
+						#component_type[str(dcwID)][currCategory][tcomponent] = tcompType
+						component_type[str(dcwID)][currCategory][currComponent] = tcompType
+						if tcompFound == True:
+							component_type[str(dcwID)][currCategory][currComponent] = "Note"
 
 					if (tprecheck != "") and (tprecheck != "None"):
-						comp_precheck[str(dcwID)][currCategory][tcomponent] = tprecheck
+						#comp_precheck[str(dcwID)][currCategory][tcomponent] = tprecheck
+						comp_precheck[str(dcwID)][currCategory][currComponent] = tprecheck
 
 					if (treq != "") and (treq != "None"):
-						comp_required[str(dcwID)][currCategory][tcomponent] = treq
+						#comp_required[str(dcwID)][currCategory][tcomponent] = treq
+						comp_precheck[str(dcwID)][currCategory][currComponent] = tprecheck
 
 					if (tsentence != "") and (tsentence != "None"):
 						sentencelist[str(dcwID)][currCategory][currComponent][tsentence] = tsentence
@@ -718,6 +770,8 @@ def ExtractOrderData(tfile, matchdata, match_results, ordermap, file_index):
 						detaillist[str(dcwID)][currCategory][currComponent][tsentence]['prn'] = tprn
 
 		# Create XML Files from parsed data
+		#if tfile.find("PED ED Acetaminophen (Tylenol) Overdose NAC.xlsx") > -1:
+		#	print(str(componentlist))
 		match_results = XMLMakeFiles(tfile, dcw_index, phaselist, categorylist, component_type, comp_precheck, comp_required, componentlist, sentencelist, detaillist, matchdata, match_results, ordermap, file_index)
 		
 		# make batch loader
@@ -788,7 +842,9 @@ mainversion = GetCurrentVersion()
 # Get a list of DCWs
 #tbatch = "Batch1"
 #tbatch = "Batch2"
-tbatch = "March3"
+#tbatch = "March3"
+#tbatch = "March6"
+tbatch = "FixBatch1"
 cst_path = "C:\\Apache24\\htdocs\\orders\\data\\high_priority\\" + tbatch
 filelist = GetCSTList(cst_path)
 #filelist = LoadPriorityCSTList("high_priority.tsv")
@@ -830,17 +886,3 @@ f.close()
 #data = defaultdict(str)
 #xmlorderprop = GetOrderSetProp()
 #CreateXMLDocument(xmlorderprop, data, "test.xml")
-
-# Zynx Import Log - Jan 3, 2023
-# Order sets with errors:
-
-#7
-#10
-#11
-#12
-#15
-#18
-#29
-#35
-#39
-#43
