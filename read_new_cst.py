@@ -4,6 +4,9 @@ from collections import defaultdict
 import glob
 import json
 
+# check for map entry errors
+errorlist = ["calcium ionized whole blood cwh", "hiv 1/2 antibody and p24 antigen bccdc", "hiv 1/2 antibody and p24 antigen phc", "holo-transcobalamin ii active b12", "influenza a, b and rsv nat bccdc", "influenza a/b and rsv nat phc", "influenza a/b nat cwh", "mri cardiac w/ contrast", "respiratory syncytial virus (rsv) nat cwh", "serum creatinine, alt  (if no recent results in past 3 months)", "dextrose 5% (d5w) intermittent flush", "eplerenone", "ferritin", "ranitidine"]
+
 def GetCurrentVersion():
 
 	tversion = 0
@@ -37,20 +40,35 @@ def LoadOrderSetIndex():
 	
 	return index_map
 
-def LoadMarch3Mapping():
+def LoadCurrentMapping():
 
 	current_map = defaultdict(str)
-	with open("mapping_mar3_2023.tsv", "r", encoding="utf-8") as infile:
+	#with open("mapping_mar3_2023.tsv", "r", encoding="utf-8") as infile:
+	#with open("mapping_mar8_2023.tsv", "r", encoding="utf-8") as infile:
+	with open("mapping_mar9_2023.tsv", "r", encoding="utf-8") as infile:
 		theader = infile.readline()
 		for line in infile:
+		
 			line = line.strip()
 			ldata = line.split("\t")
+
 			if len(ldata) > 2:
 				tbase = ldata[0].lower().strip()
+				tbase = tbase.replace("stat", "")
+				tbase = ' '.join(tbase.split())
 				tval = ldata[1]
 				if tval.lower().strip() == "insert note":
 					tval = "insert note::" + ldata[3]
 				current_map[tbase] = tval
+
+				# remove stat
+				tbase = tbase.replace("stat", "")
+				tbase = ' '.join(tbase.split())
+				current_map[tbase] = tval
+				
+				# check
+				if tbase.find("electrocardiogram") > -1:
+					print(tbase + "\t" + tval)
 			
 	infile.close()
 
@@ -110,11 +128,16 @@ def LoadNHOrderData():
 	matchdata = defaultdict(str)
 	for x in range(1, row_count):
 		# match on e, f
-		val1 = str(sheet.cell(row=x, column=5).value).strip().lower()
-		val2 = str(sheet.cell(row=x, column=6).value).strip().lower()
+		val1 = str(sheet.cell(row=x, column=5).value)
+		val2 = str(sheet.cell(row=x, column=6).value)
+		oval1 = val1.lower().strip()
+		oval2 = val2.lower().strip()
+		
 		#print("NH data: " + "\t" + str(val1) + "\t" + str(val2))
-		matchdata[val1] = ""
-		matchdata[val2] = ""
+		matchdata[oval1] = val1
+		matchdata[oval2] = val2
+		matchdata[val1] = val1
+		matchdata[val2] = val2
 
 	return matchdata
 
@@ -134,6 +157,7 @@ def LoadNHToCSTMap():
 
 	return tablemap
 
+#def MatchToNHOrders(tval, matchdata, match_results):
 def MatchToNHOrders(tval, matchdata, match_results):
 
 	nval = tval.strip().lower()
@@ -239,6 +263,14 @@ def FormatStr(tfield):
 	nfield = nfield.replace("\n", "&#10;&#13;")
 	nfield = nfield.replace("<", "&lt;")
 	nfield = nfield.replace(">", "&gt;")
+	nfield = nfield.replace('”', '"')
+	nfield = nfield.replace('“', '"')
+
+	return nfield
+
+def FormatTitle(tfield):
+
+	nfield = tfield.replace('&', 'and')
 	nfield = nfield.replace('”', '"')
 	nfield = nfield.replace('“', '"')
 
@@ -357,6 +389,8 @@ def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_li
 
 	showdebug = 0
 	tXML = "\n" + GetIndent(5) + "<COMPONENTLIST>\n"
+	numOrders = 0
+	numNotes = 0
 	for tid in component_list[dcwid][catid]:
 	
 		# check if note or order - component_type[str(dcwID)][currCategory][tcomponent] = tcompType
@@ -378,6 +412,7 @@ def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_li
 			
 			nXML += GetIndent(6) + "<COMPONENT>\n"
 			ncaption = tcaption.lower().strip()
+			ncaption = ' '.join(ncaption.split())
 			pcaption = FormatStr(tcaption).strip()
 			porder = ordermap[ncaption].lower().strip()
 			tdup = False
@@ -386,8 +421,35 @@ def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_li
 				tindex = ncaption.index('duplicate')
 				dupsuffix = ncaption[tindex:]
 				ncaption = ncaption[0:tindex].lower().strip()
-				
+				pcaption = tcaption
+			
+			# check if order found in order map
+			tfound = False
+			ncaption = ncaption.replace('stat', "")
+			ncaption = ' '.join(ncaption.split())
 			if ncaption in ordermap:
+				porder = ordermap[ncaption].lower().strip()
+				tfound = True
+				
+			#if tfound == False:
+			#	if ncaption in ordermap:
+			#		tfound = True
+			#		porder = ordermap[ncaption].lower().strip()
+			#		print("Order: " + porder + "\t" + nxcaption)
+
+			#print("ncaption: " + ncaption)
+								
+			if (porder == "") and (tcomponent_type != "note"):
+				#if tfound == False:
+				match_results[pcaption] = "No NH match"
+
+			nhfound = False			
+			# check if the order is found in NH order catalog
+			if ncaption in matchdata:
+				nhfound = True
+				match_results[pcaption] = "Exact Match"
+				
+			if tfound == True:
 			
 				# map orders
 				if (porder != 'no nh match') and (porder != 'ignore') and (porder.find('insert note::') == -1):
@@ -407,7 +469,7 @@ def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_li
 					ttype = "L"
 
 			if tdup == True:
-				pcaption = "Duplicate order to be configured: " + pcaption + " " + dupsuffix
+				pcaption = "Duplicate order to be configured: " + tcaption
 				ttype = "L"
 							
 			if ncaption == "ignore":
@@ -417,7 +479,7 @@ def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_li
 			if pcaption == "":
 				pcaption = tcaption
 
-			print("ncaption: " + ncaption + "\t" + " pcaption: " + pcaption)
+			#print("ncaption: " + ncaption + "\t" + " pcaption: " + pcaption)
 			
 			if (tcomponent_type == "note") or (ttype == "L") or (ncaption not in ordermap):
 				if ncaption != 'ignore':
@@ -426,7 +488,17 @@ def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_li
 			
 			if ttype == "O":
 				# check to see if caption exists in NH orders:
-				match_results = MatchToNHOrders(tcaption, matchdata, match_results)
+				#match_results = MatchToNHOrders(tcaption, matchdata, match_results)
+				#match_results = MatchToNHOrders(ncaption, matchdata, match_results)
+
+				# check for errors
+				#if pcaption in errorlist:
+				#	print("Error found: " + pcaption)
+
+				# record missing matches
+				if tfound == False:
+					match_results[tcaption] = "No NH match"
+
 				nXML += GetIndent(7) + "<CAPTION>" + pcaption + "</CAPTION>\n"			
 			
 			nXML += "\n" + GetIndent(7) + "<CKI/>\n"
@@ -437,13 +509,22 @@ def XMLBuildComponentList(dcwid, catid, component_list, sentence_list, detail_li
 			#tXML += GetIndent(7) + XMLBuildSentenceList(dcwid, catid, tid, sentence_list, detail_list)
 			nXML += GetIndent(6) + "</COMPONENT>\n"
 			
-			if (ttype != 'X') and (pcaption != 'ignore'):
+			if (ttype != 'X') and (pcaption != 'ignore') and (pcaption.find('ignore') == -1):
 				tXML += nXML
+				
+				# count up
+				#if ttype == 'L':
+				#	numNotes += 1
+				#if ttype == 'O':
+				#	numOrders += 1
 				
 	if (showdebug == 1):
 		print(nXML)
 			
 	tXML += GetIndent(5) + "</COMPONENTLIST>\n"
+	
+	#print("Number of notes: " + str(numNotes))
+	#print("Number of orders: " + str(numOrders))
 
 	return tXML, match_results
 
@@ -468,14 +549,15 @@ def XMLBuildCategoryList(dcwid, category_list, component_list, sentence_list, de
 
 def XMLMakeRoot(ttitle, tphase):
 
+	ntitle = FormatTitle(ttitle)
 	tXML = '<?xml version="1.0" encoding="UTF-8"?>' + "\n"
 	tXML += "<KNOWLEDGEPLAN>\n"
 	tXML += "\t" + "<SOURCEORDERSETTYPE>CAREPLAN</SOURCEORDERSETTYPE>\n"
-	tXML += "\t" + "<CAPTION>" + ttitle + " (Version " + str(mainversion) + ")</CAPTION>\n"
+	tXML += "\t" + "<CAPTION>" + ntitle + " (Version " + str(mainversion) + ")</CAPTION>\n"
 	tXML += "\t" + "<ORDERSETLIST>\n"
 	tXML += "\t\t" + "<ORDERSET>\n"
-	tXML += "\t\t\t" + "<CAPTION>" + ttitle + " (Version " + str(mainversion) + ")</CAPTION>\n"
-	tXML += "\t\t\t" + "<DISPLAY>" + ttitle + " (Version " + str(mainversion) + ")</DISPLAY>\n"
+	tXML += "\t\t\t" + "<CAPTION>" + ntitle + " (Version " + str(mainversion) + ")</CAPTION>\n"
+	tXML += "\t\t\t" + "<DISPLAY>" + ntitle + " (Version " + str(mainversion) + ")</DISPLAY>\n"
 	tXML += "\t\t\t" + "<EVIDENCEURL/>" + "\n"
 	tXML += "\t\t\t" + "<EVIDENCEURLTYPEMEAN/>" + "\n"
 	tXML += "\t\t\t" + "<CKI/>" + "\n"
@@ -610,7 +692,31 @@ def ExtractOrderData(tfile, matchdata, match_results, ordermap, file_index):
 
 	#tfile = "DCW Library - All PowerPlans in P0783 (DCW Format).xlsx"
 	book = openpyxl.load_workbook(tfile)
-	sheet = book.active 
+	
+	# get the right sheet - the only sheet, "MUM" sheet, or the active sheet 
+	sheet = book.active
+	numsheets = len(book.sheetnames)
+	if numsheets == 1:
+		sheet = book.active
+	if numsheets > 1:
+		tfound = False
+
+		for tsheet in book.worksheets:
+			ttitle = tsheet.title
+			if ttitle.find('MUM') > -1:
+				sheet = tsheet
+				tfound = True
+
+		#if tfound == False:
+		#	for tsheet in book.worksheets:
+		#		ttitle = tsheet.title
+		#		if ttitle.find('Components') > -1:
+		#			sheet = tsheet
+		#			tfound = True
+		
+		if tfound == False:
+			sheet = book.active
+	
 	row_count = sheet.max_row
 	column_count = sheet.max_column
 	#print("Current sheet: " + str(sheet.title))
@@ -844,6 +950,8 @@ mainversion = GetCurrentVersion()
 #tbatch = "Batch2"
 #tbatch = "March3"
 #tbatch = "March6"
+#tbatch = "First100"
+#tbatch = "Last30"
 tbatch = "FixBatch1"
 cst_path = "C:\\Apache24\\htdocs\\orders\\data\\high_priority\\" + tbatch
 filelist = GetCSTList(cst_path)
@@ -856,8 +964,7 @@ matchdata = LoadNHOrderData()
 match_results = defaultdict(str)
 
 #ordermap = LoadNHToCSTMap()
-ordermap = LoadMarch3Mapping()
-current_map = ordermap
+ordermap = LoadCurrentMapping()
 
 # parse excel sheet into JSON
 tcnt = 0
@@ -871,14 +978,15 @@ for x in range(0, len(filelist)):
 	match_results = ExtractOrderData(nfile, matchdata, match_results, ordermap, x)
 	tcnt += 1
 
+print("matching:")
+print(str(match_results))
+
 # write out mapping between NH order library and CST
 f = open("nh_to_cst_map_" + tbatch + ".tsv", "w")
 for tid in match_results:
-	tresult = match_results[tid]
-	if tid in current_map:
-		if current_map[tid] != "no nh match":
-			tresult = current_map[tid]
-	if tid not in current_map:
+	tresult = match_results[tid].strip().lower()
+	tmatch = ordermap[tid].strip()
+	if (tresult == "no nh match"):
 		f.write(tid + "\t" + tresult + "\n")
 f.close()
 
